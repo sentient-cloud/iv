@@ -1,0 +1,97 @@
+:root {
+  --black: #0e1116;
+  --white: #f2f2f2;
+  --yellow: #f3b61f;
+  --purple: #966b9d;
+}
+
+i,
+a,
+p,
+li {
+  font-family: "Josefin";
+  font-size: 14pt;
+  color: var(--white);
+}
+
+h1 {
+  font-family: "Fira Mono";
+  font-size: 24pt;
+  font-weight: 800;
+}
+
+h2 {
+  font-family: "Fira Mono";
+  font-size: 20pt;
+}
+
+h3 {
+  font-family: "Fira Mono";
+  font-size: 18pt;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--white);
+}
+
+pre {
+  font-family: "Fira Mono";
+  color: var(--white);
+  font-size: 10pt;
+  line-height: 1.2;
+}
+
+@font-face {
+  font-family: "Material Icons";
+  font-style: normal;
+  font-weight: 400;
+  src: local("Material Icons"), local("MaterialIcons-Regular"),
+    url("MaterialIcons-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Josefin";
+  font-style: normal;
+  src: local("Josefin Sans"),
+    url("JosefinSans-VariableFont_wght.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Josefin";
+  font-style: italic;
+  src: local("Josefin Sans"),
+    url("JosefinSans-Italic-VariableFont_wght.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Fira Mono";
+  src: local("Fira Mono"), url("FiraMono-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Fira Mono";
+  font-style: bold;
+  src: local("Fira Mono"), url("FiraMono-Bold.ttf") format("truetype");
+}
+
+.container {
+  height: 100svh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background-color: var(--black);
+}
+
+.header {
+  background-color: var(--purple);
+  width: 100%;
+  height: 4em;
+  display: flex;
+  gap: 1.5em;
+  padding: 0 1em;
+}
+
+.header > * {
+  margin: auto 0;
+}
