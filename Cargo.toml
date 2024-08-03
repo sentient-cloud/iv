@@ -13,3 +13,6 @@ chrono = "0.4.38"
 fern = { version = "0.6.2", features = ["colored"] }
 actix-files = "0.6.6"
 lazy_static = "1.5.0"
+mime = "0.3.17"
+sqlx = { version = "0.8.0", features = ["sqlite"] }
+urlencoding = "2.1.3"

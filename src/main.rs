@@ -13,7 +13,7 @@ use actix_web::{
 
 use clap::Parser;
 use fern::colors::{Color, ColoredLevelConfig};
-use maud::html;
+use partials::FooterArgs;
 
 mod partials;
 
@@ -187,6 +187,14 @@ fn visit_dir(dir: &PathBuf) -> Vec<PathBuf> {
         .collect::<Vec<_>>()
 }
 
+fn stat_all(dirs: Vec<PathBuf>) -> Vec<(PathBuf, std::fs::Metadata)> {
+    dirs.into_iter()
+        .map(|path| (path.clone(), path.metadata()))
+        .filter(|(_, meta)| meta.is_ok())
+        .map(|(path, meta)| (path, meta.unwrap()))
+        .collect()
+}
+
 // Canonicalizes the path and returns it if its allowed
 fn canonicalize_path(
     path: &PathBuf,
@@ -199,7 +207,7 @@ fn canonicalize_path(
     let mut target_path = base_dir.clone();
 
     if path.is_absolute() {
-        target_path.push(path.strip_prefix("/").unwrap());
+        target_path.push(path.strip_prefix("/").unwrap_or(&path));
     } else {
         target_path.push(path);
     }
@@ -208,23 +216,21 @@ fn canonicalize_path(
         return None;
     }
 
-    let mut target_path = target_path.canonicalize().unwrap();
+    let mut target_path = target_path.canonicalize().unwrap_or(target_path);
 
     if !allow_nondir && !target_path.is_dir() {
         target_path.pop();
     }
 
-    if args.traverse {
-        if target_path.starts_with(base_dir) {
-            return Some(target_path);
-        }
-    } else {
-        if target_path == base_dir {
-            return Some(target_path);
-        }
+    if !args.traverse && target_path != base_dir {
+        return None;
     }
 
-    return None;
+    if target_path.starts_with(base_dir) {
+        return Some(target_path);
+    } else {
+        return None;
+    }
 }
 
 async fn index(
@@ -232,10 +238,29 @@ async fn index(
     args: web::Data<Args>,
     pwd: web::Data<Arc<RwLock<PathBuf>>>,
 ) -> impl Responder {
-    let path = PathBuf::from(req.path());
+    let path = PathBuf::from(String::from(urlencoding::decode(req.path()).unwrap()));
 
     if let Some(path) = canonicalize_path(&path, &args, &PWD.read().unwrap(), false) {
-        let dirs = visit_dir(&path);
+        let mut dirs = stat_all(visit_dir(&path));
+
+        dirs.sort_by_cached_key(|(path, _)| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .to_string()
+        });
+        dirs.sort_by_key(|(_, meta)| !meta.is_dir());
+
+        let num_dirs = dirs.iter().fold(
+            0,
+            |acc, (path, _)| if path.is_dir() { acc + 1 } else { acc },
+        );
+
+        let total_size = dirs.iter().fold(
+            0,
+            |acc, (_, meta)| if meta.is_dir() { acc } else { acc + meta.len() },
+        );
 
         let mut pwd = pwd.read().unwrap().to_string_lossy().to_string();
         let home = env::var("HOME").unwrap_or("/".to_string());
@@ -246,26 +271,45 @@ async fn index(
 
         return HttpResponse::Ok().body(
             partials::page(
-                "iv~~!",
+                "iv",
                 &pwd,
-                html!(
-                    pre {
-                        (format!("{:#?}", dirs))
-                    }
-                ),
+                &path,
+                FooterArgs {
+                    num_entries: dirs.len(),
+                    num_dirs,
+                    total_size,
+                },
+                partials::entry_grid(&args, dirs),
             )
             .into_string(),
         );
     }
 
-    return HttpResponse::NotFound().body("404 Not Found");
+    return HttpResponse::TemporaryRedirect()
+        .append_header(("Location", "/"))
+        .finish();
 }
 
 async fn assets(req: HttpRequest, args: web::Data<Args>) -> actix_web::Result<NamedFile> {
-    let path = PathBuf::from(req.path());
-    let path = PathBuf::from("assets").join(path.strip_prefix("/_!").unwrap());
+    let path = PathBuf::from(String::from(urlencoding::decode(req.path()).unwrap()));
+    let path = PathBuf::from("assets").join(path.strip_prefix("/_!").unwrap_or(&path));
 
     if let Some(path) = canonicalize_path(&path, &args, &env::current_dir().unwrap(), true) {
+        Ok(NamedFile::open(path)?)
+    } else {
+        Err(actix_web::error::ErrorNotFound("404 Not Found"))
+    }
+}
+
+async fn file(req: HttpRequest, args: web::Data<Args>) -> actix_web::Result<NamedFile> {
+    let path = PathBuf::from(String::from(urlencoding::decode(req.path()).unwrap()));
+    let path = PathBuf::from(path.strip_prefix("/!_").unwrap_or(&path));
+
+    if path.is_dir() {
+        return Err(actix_web::error::ErrorNotFound("404 Not Found"));
+    }
+
+    if let Some(path) = canonicalize_path(&path, &args, &PWD.read().unwrap(), true) {
         Ok(NamedFile::open(path)?)
     } else {
         Err(actix_web::error::ErrorNotFound("404 Not Found"))
@@ -318,6 +362,7 @@ async fn main() -> std::io::Result<()> {
                 .default_service(web::route().to(index))
                 // FUCK me if someone uses _! to prefix a filename
                 .service(web::resource("/_!/{path:.*}").to(assets))
+                .service(web::resource("/!_/{path:.*}").to(file))
         }
     })
     .bind((args.host, args.port))?
