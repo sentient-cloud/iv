@@ -243,6 +243,8 @@ async fn index(
     if let Some(path) = canonicalize_path(&path, &args, &PWD.read().unwrap(), false) {
         let mut dirs = stat_all(visit_dir(&path));
 
+        log::debug!("serving path: {:?}", path);
+
         dirs.sort_by_cached_key(|(path, _)| {
             path.file_name()
                 .unwrap()
@@ -285,16 +287,47 @@ async fn index(
         );
     }
 
+    log::debug!("redirecting to /");
+
     return HttpResponse::TemporaryRedirect()
         .append_header(("Location", "/"))
         .finish();
 }
 
-async fn assets(req: HttpRequest, args: web::Data<Args>) -> actix_web::Result<NamedFile> {
+#[cfg(not(debug_assertions))]
+static RELEASE_ASSETS: include_dir::Dir<'_> = include_dir::include_dir!("assets");
+
+#[cfg(not(debug_assertions))]
+async fn assets(req: HttpRequest) -> impl Responder {
+    let path = PathBuf::from(String::from(urlencoding::decode(req.path()).unwrap()));
+    let path = path.strip_prefix("/_!").unwrap_or(&path);
+
+    let ext = path
+        .extension()
+        .unwrap_or_default()
+        .to_str()
+        .unwrap_or_default();
+
+    if let Some(file) = RELEASE_ASSETS.get_file(&path) {
+        log::debug!("serving asset: {:?}", path);
+
+        return HttpResponse::Ok()
+            .append_header(("Content-Length", file.contents().len()))
+            .append_header(("Content-Type", actix_files::file_extension_to_mime(ext)))
+            .body(file.contents());
+    } else {
+        return HttpResponse::NotFound().finish();
+    }
+}
+
+#[cfg(debug_assertions)]
+async fn assets(req: HttpRequest) -> actix_web::Result<NamedFile> {
     let path = PathBuf::from(String::from(urlencoding::decode(req.path()).unwrap()));
     let path = PathBuf::from("assets").join(path.strip_prefix("/_!").unwrap_or(&path));
 
-    if let Some(path) = canonicalize_path(&path, &args, &env::current_dir().unwrap(), true) {
+    log::debug!("serving asset: {:?}", path);
+
+    if path.exists() {
         Ok(NamedFile::open(path)?)
     } else {
         Err(actix_web::error::ErrorNotFound("404 Not Found"))
@@ -323,7 +356,9 @@ async fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     if args.dir.is_some() {
-        *PWD.write().unwrap() = args.dir.clone().unwrap();
+        *PWD.write().unwrap() = args.dir.clone().unwrap().canonicalize().unwrap();
+    } else {
+        *PWD.write().unwrap() = env::current_dir().unwrap();
     }
 
     setup_logging(
@@ -340,6 +375,11 @@ async fn main() -> std::io::Result<()> {
 
     log::debug!("args: {:?}", args);
     log::debug!("pwd: {:?}", env::current_dir().unwrap());
+
+    log::info!(
+        "Serving directory: {}",
+        PWD.read().unwrap().to_string_lossy()
+    );
 
     if !args.no_open {
         std::thread::spawn({
